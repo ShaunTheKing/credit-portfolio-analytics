@@ -13,27 +13,53 @@ synthetic one built to stress-test the method.
 
 ## What this is
 
-Two datasets, one analytical toolkit:
+Three datasets, one analytical toolkit:
 
-| | **Real** | **Synthetic** |
-| --- | --- | --- |
-| Source | [UCI Default of Credit Card Clients](https://archive.ics.uci.edu/dataset/350/default+of+credit+card+clients) | Seeded generator in this repo |
-| Scale | 30,000 clients · 180,000 client-months | 12,000 accounts · 246,000 account-months |
-| Contains | Real observed defaults, real behavioral correlations | Revenue, channel, fee, and offer fields |
-| Purpose | Findings | Method — KPI system, segmentation, pricing model, program design |
+| | **UCI credit cards** | **LendingClub loans** | **Synthetic portfolio** |
+| --- | --- | --- | --- |
+| Nature | Real | Real | Generated |
+| Scale | 30,000 clients · 180,000 client-months | 115,675 loans · $1.64B principal | 12,000 accounts · 246,000 account-months |
+| Has revenue? | No | **Yes — interest, losses, recoveries** | Yes |
+| Answers | Who defaults, and why | **Does risk-based pricing pay?** | Offers, channels, CAC, CLV |
+| Findings | [real-data-findings.md](docs/real-data-findings.md) | [loan-findings.md](docs/loan-findings.md) | [analysis-log.md](docs/analysis-log.md) |
 
-The real dataset provides ground truth. The synthetic one fills the gaps the real data doesn't
-have (revenue, acquisition cost, offer exposure) so the full analytical workflow — including
-unit economics and experiment design — can be demonstrated end to end.
+The synthetic portfolio exists to fill what neither real dataset provides — acquisition cost,
+offer exposure, and channel mix — so the full workflow, including unit economics and experiment
+design, can be demonstrated end to end.
 
-**Everything is reproducible.** Both pipelines run from a clean clone and regenerate every
+**Everything is reproducible.** All three pipelines run from a clean clone and regenerate every
 figure quoted below.
 
 ---
 
 ## Findings
 
-### Real data (30,000 clients, Apr–Sep 2005)
+### LendingClub loans (115,675 loans, $1.64B principal)
+
+**Risk-based pricing worked at 36 months and broke down at 60.** This is the most actionable
+result in the project, and it only appears when you split by term:
+
+| Term | Grade A | Grade C | Grade D | Grade E |
+| --- | --- | --- | --- | --- |
+| **36 months** | 7.16% | 10.60% | 12.40% | **15.19%** |
+| **60 months** | 7.17% | 8.17% | **7.53%** | 9.90% |
+
+At 36 months ROI rises monotonically with risk. At 60 months it collapses — grade D returns
+7.53% versus 12.40% for the same grade at 36 months, with charge-off rates nearly doubling
+(19.67% → 32.10%). Longer terms give defaults more time to occur before the rate premium is
+collected. **The pooled view actively misleads** (see [loan-findings.md](docs/loan-findings.md)).
+
+**Portfolio result:** $142.6M net profit on $1,636.8M principal — an **8.71%** return, with
+recoveries returning 17.3% of written-off principal.
+
+**The denominator trap:** 11.3% of loans are still open. Charge-off rate is **13.32%** among
+resolved loans but **11.81%** across all loans — a 13% relative understatement from one
+denominator choice.
+
+**Larger loans are worse on both axes:** charge-off rates roughly double from <$5k to $30k+
+(8.82% → 15.72%) while ROI falls by a third (11.31% → 7.93%).
+
+### UCI credit cards (30,000 clients, Apr–Sep 2005)
 
 **Repayment behavior is a sharper risk signal than utilization.**
 
@@ -83,19 +109,23 @@ git clone https://github.com/ShaunTheKing/credit-portfolio-analytics.git
 cd credit-portfolio-analytics
 pip install duckdb xlrd
 
-# Real data — downloads ~5 MB from UCI
+# LendingClub loans — downloads ~20 MB, includes profit & loss
+python3 scripts/fetch_loan_data.py
+python3 scripts/run_loan_analysis.py         # -> output/loans/
+
+# UCI credit cards — downloads ~5 MB
 python3 scripts/fetch_real_data.py
 python3 scripts/run_real_analysis.py         # -> output/real/
 
-# Synthetic portfolio — full analytics pipeline
+# Synthetic portfolio — no external data
 ./scripts/run_all.sh                         # -> output/
 ./scripts/run_all.sh --quick                 # smoke test, ~2 seconds
 ```
 
 Outputs land in `output/`: an executive memo, a dashboard, and raw result JSON.
 
-> The DuckDB CLI is optional — loading runs through Python. Generated data and the downloaded
-> dataset are git-ignored; everything regenerates on demand.
+> The DuckDB CLI is optional — loading runs through Python. Generated data and downloaded
+> datasets are git-ignored; everything regenerates on demand.
 
 ---
 
@@ -105,25 +135,32 @@ Outputs land in `output/`: an executive memo, a dashboard, and raw result JSON.
 credit-portfolio-analytics/
 ├── docs/
 │   ├── metrics-playbook.md       # KPI dictionary, unit-economics tree, validation checklist
-│   ├── real-data-findings.md     # Findings on the real dataset
+│   ├── loan-findings.md          # Findings: LendingClub profitability & pricing
+│   ├── real-data-findings.md     # Findings: UCI credit-card default risk
 │   ├── analysis-log.md           # Synthetic findings + QA record + bugs found and fixed
 │   ├── case-brief.md             # Business context, data model, hypotheses
 │   └── ai-workflow.md            # AI-assisted analysis workflow and verification checklist
 ├── scripts/
+│   ├── fetch_loan_data.py        # Download + clean the LendingClub loan files
 │   ├── fetch_real_data.py        # Download + reshape the UCI dataset into a panel
 │   ├── generate_synthetic_data.py# Seeded portfolio generator (standard library only)
-│   ├── run_real_analysis.py      # Executes the real-data SQL pack
+│   ├── run_loan_analysis.py      # Executes the loan SQL pack
+│   ├── run_real_analysis.py      # Executes the UCI SQL pack
 │   ├── run_all.sh                # generate -> load -> analyze -> build
 │   ├── run_analysis.py           # Executes the synthetic SQL pack
 │   └── build_memo.py             # Renders memo + single-file dashboard
 ├── sql/
 │   ├── schema.sql, load.sql      # Synthetic schema + load with QA checks
-│   ├── schema_real.sql           # Real schema (adds audit-only demographics)
+│   ├── schema_real.sql           # UCI schema (adds audit-only demographics)
+│   ├── schema_loans.sql          # LendingClub loan schema + resolved-loan view
+│   ├── loan_analysis.sql         # 9 profit/pricing queries incl. term-split analysis
 │   ├── kpi_dashboard.sql         # Monthly KPI pack
 │   ├── segmentation.sql          # Trailing-3-month behavioral segments
 │   ├── pricing_sensitivity.sql   # Assumptions table, scenarios, fairness audit
 │   └── real_analysis.sql         # 9 queries incl. loss-rate denominator and fairness audit
 └── output/                       # Generated deliverables
+    ├── loans/                    # LendingClub results
+    └── real/                     # UCI results
 ```
 
 ---

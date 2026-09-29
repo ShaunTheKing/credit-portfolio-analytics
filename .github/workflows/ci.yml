@@ -116,6 +116,67 @@ jobs:
                 f"rising {reliable} (small buckets: {[f'{r}%' for _, n, r in rates if n < 300]})")
           PY
 
+  loan-pipeline:
+    name: Loan pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install duckdb
+
+      - name: Fetch and clean the LendingClub loan files
+        run: python3 scripts/fetch_loan_data.py
+
+      - name: Run loan profitability analysis
+        run: python3 scripts/run_loan_analysis.py
+
+      - name: Assert the denominator guard and economics hold
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          res = {r["query"]: r for r in json.load(open("output/loans/loan_results.json"))}
+          if len(res) < 9:
+              sys.exit(f"FAIL: expected 9 result sets, got {len(res)}")
+
+          # Q0: the resolved-only charge-off rate must be HIGHER than the naive
+          # all-loans rate. If that ever inverts, the ETL is mis-bucketing statuses.
+          q0 = {c: v for c, v in zip(res["Q0"]["columns"], res["Q0"]["rows"][0])}
+          if q0["chargeoff_rate_resolved_pct"] <= q0["chargeoff_rate_all_pct"]:
+              sys.exit(f"FAIL: resolved rate should exceed the all-loans rate: {q0}")
+          if not (10 <= q0["chargeoff_rate_resolved_pct"] <= 20):
+              sys.exit(f"FAIL: charge-off rate outside plausible range: {q0}")
+
+          # Q1: the portfolio must be profitable at a sane return
+          q1 = {c: v for c, v in zip(res["Q1"]["columns"], res["Q1"]["rows"][0])}
+          if q1["net_profit_millions"] <= 0:
+              sys.exit(f"FAIL: portfolio not profitable: {q1}")
+          if not (2 <= q1["return_on_principal_pct"] <= 25):
+              sys.exit(f"FAIL: return on principal implausible: {q1['return_on_principal_pct']}%")
+
+          # Q3: the headline finding — 36-month ROI rises with risk, while
+          # 60-month ROI does not. Guard the shape of that conclusion.
+          # Key by column name so this survives any column reordering.
+          cols = res["Q3"]["columns"]
+          recs = [dict(zip(cols, r)) for r in res["Q3"]["rows"]]
+          t36 = {r["grade"]: r["roi_pct"] for r in recs if r["term_months"] == 36}
+          t60 = {r["grade"]: r["roi_pct"] for r in recs if r["term_months"] == 60}
+          if not (t36["A"] < t36["C"] < t36["E"]):
+              sys.exit(f"FAIL: 36-month ROI should rise with risk: {t36}")
+          if t60["D"] >= t36["D"]:
+              sys.exit(f"FAIL: expected 60-month grade D ROI below 36-month: {t60['D']} vs {t36['D']}")
+
+          print(f"OK: charge-off {q0['chargeoff_rate_resolved_pct']}% resolved "
+                f"(vs {q0['chargeoff_rate_all_pct']}% naive); "
+                f"${q1['net_profit_millions']}M profit at {q1['return_on_principal_pct']}%")
+          print(f"    36mo ROI A->E {t36['A']} -> {t36['E']}; "
+                f"60mo grade D {t60['D']} (pricing breakdown holds)")
+          PY
+
   sql-lint:
     name: SQL executes
     runs-on: ubuntu-latest

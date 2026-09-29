@@ -1,6 +1,7 @@
 # Generated data — regenerate locally, keeps the repo small and reviewable
 data/
 data_real/
+data_loans/
 .cache/
 *.duckdb
 *.duckdb.wal
