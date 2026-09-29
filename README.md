@@ -139,7 +139,8 @@ credit-portfolio-analytics/
 │   ├── real-data-findings.md     # Findings: UCI credit-card default risk
 │   ├── analysis-log.md           # Synthetic findings + QA record + bugs found and fixed
 │   ├── case-brief.md             # Business context, data model, hypotheses
-│   └── ai-workflow.md            # AI-assisted analysis workflow and verification checklist
+│   ├── ai-workflow.md            # AI-assisted analysis workflow and verification checklist
+│   └── jev-integration.md        # Design note: where a decision model fits, and where it must not
 ├── scripts/
 │   ├── fetch_loan_data.py        # Download + clean the LendingClub loan files
 │   ├── fetch_real_data.py        # Download + reshape the UCI dataset into a panel
@@ -185,6 +186,11 @@ model using them would require a documented disparate-impact analysis and legal 
 
 **Assumptions are visible and parameterized.** Every scenario reads from an assumptions table
 (`sql/pricing_sensitivity.sql` §1) and reports low/base/high rather than a point estimate.
+
+**Judgment models stay out of the arithmetic.** Every headline finding here is exact
+computation, so no probabilistic model touches it. [jev-integration.md](docs/jev-integration.md)
+documents the one place a decision model *would* earn its keep — reading 36,477 messy free-text
+job titles — and the places it would make the analysis worse.
 
 ---
 
