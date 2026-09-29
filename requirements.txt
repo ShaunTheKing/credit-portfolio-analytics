@@ -1,0 +1,12 @@
+# Python dependencies for the analysis pipelines.
+#
+#   python3 -m venv .venv
+#   source .venv/bin/activate        # Windows: .venv\Scripts\activate
+#   pip install -r requirements.txt
+#
+# duckdb — the Python module used for all SQL execution.
+#          (`brew install duckdb` installs only the CLI, which these scripts do not use.)
+# xlrd   — reads the legacy .xls format of the UCI credit-card dataset.
+
+duckdb>=1.0
+xlrd>=2.0

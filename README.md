@@ -107,25 +107,57 @@ Full write-ups: [real-data-findings.md](docs/real-data-findings.md) ·
 ```bash
 git clone https://github.com/ShaunTheKing/credit-portfolio-analytics.git
 cd credit-portfolio-analytics
+
+# 1. Create a virtual environment (recommended — see the note below)
+python3 -m venv .venv
+source .venv/bin/activate                 # Windows: .venv\Scripts\activate
 pip install duckdb xlrd
 
-# LendingClub loans — downloads ~20 MB, includes profit & loss
-python3 scripts/fetch_loan_data.py
-python3 scripts/run_loan_analysis.py         # -> output/loans/
-
-# UCI credit cards — downloads ~5 MB
-python3 scripts/fetch_real_data.py
-python3 scripts/run_real_analysis.py         # -> output/real/
-
-# Synthetic portfolio — no external data
-./scripts/run_all.sh                         # -> output/
-./scripts/run_all.sh --quick                 # smoke test, ~2 seconds
+# 2. Run any pipeline
+python3 scripts/fetch_loan_data.py && python3 scripts/run_loan_analysis.py   # -> output/loans/
+python3 scripts/fetch_real_data.py && python3 scripts/run_real_analysis.py   # -> output/real/
+./scripts/run_all.sh                                                          # -> output/
+./scripts/run_all.sh --quick       # smoke test, ~2 seconds
 ```
 
 Outputs land in `output/`: an executive memo, a dashboard, and raw result JSON.
 
-> The DuckDB CLI is optional — loading runs through Python. Generated data and downloaded
-> datasets are git-ignored; everything regenerates on demand.
+<details>
+<summary><strong>Troubleshooting: "externally-managed-environment" or "No module named 'duckdb'"</strong></summary>
+
+The scripts import the DuckDB **Python module**, which is a *separate install* from the DuckDB
+**command-line tool**:
+
+| Command | Installs | Used by these scripts |
+| --- | --- | --- |
+| `pip install duckdb` | Python module | ✅ **this is the one you need** |
+| `brew install duckdb` | CLI only | ❌ not used |
+| `conda install duckdb` | Python module | ✅ works if the env is active |
+
+On Homebrew, Debian/Ubuntu, and conda-base Python, a plain `pip install` may be refused with
+`error: externally-managed-environment` (PEP 668). Options:
+
+```bash
+# Recommended: a virtual environment works everywhere
+python3 -m venv .venv && source .venv/bin/activate && pip install duckdb xlrd
+
+# Or install for the current user only
+python3 -m pip install --user duckdb xlrd
+
+# Or, with conda active
+python -m pip install duckdb xlrd
+```
+
+Any script that finds a missing dependency prints this guidance itself — run one and read the
+message. To check your interpreter before running anything:
+
+```bash
+python3 scripts/requirements.py     # shows interpreter, venv status, and what's missing
+```
+
+</details>
+
+> Generated data and downloaded datasets are git-ignored; everything regenerates on demand.
 
 ---
 
@@ -141,7 +173,9 @@ credit-portfolio-analytics/
 │   ├── case-brief.md             # Business context, data model, hypotheses
 │   ├── ai-workflow.md            # AI-assisted analysis workflow and verification checklist
 │   └── jev-integration.md        # Design note: where a decision model fits, and where it must not
+├── requirements.txt              # duckdb + xlrd (install into a venv)
 ├── scripts/
+│   ├── requirements.py           # dependency doctor: reports what's missing
 │   ├── fetch_loan_data.py        # Download + clean the LendingClub loan files
 │   ├── fetch_real_data.py        # Download + reshape the UCI dataset into a panel
 │   ├── generate_synthetic_data.py# Seeded portfolio generator (standard library only)

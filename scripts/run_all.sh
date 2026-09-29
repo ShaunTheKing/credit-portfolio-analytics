@@ -11,6 +11,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Fail fast with actionable guidance rather than halfway through the pipeline.
+# (The DuckDB *CLI* is not needed — loading runs through the Python module.)
+if ! python3 -c "import duckdb" >/dev/null 2>&1; then
+  echo "ERROR: the Python module 'duckdb' is not available to this interpreter." >&2
+  echo >&2
+  python3 scripts/requirements.py >&2 || true
+  exit 1
+fi
+
 QUICK=0
 [ "${1:-}" = "--quick" ] && QUICK=1
 
@@ -29,11 +38,12 @@ echo "==> 2/4 Loading into DuckDB..."
 # previous run's rows with this one (and `COPY` would fail or double-count).
 rm -f credit.duckdb
 python3 - <<'PY'
-import duckdb, sys
-try:
-    con = duckdb.connect('credit.duckdb')
-except Exception as e:
-    sys.exit(f"duckdb unavailable ({e}). Install: python3 -m pip install duckdb")
+import os, sys
+sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
+from requirements import require
+duckdb = require("duckdb")
+
+con = duckdb.connect('credit.duckdb')
 con.execute(open('sql/schema.sql').read())
 con.execute(open('sql/load.sql').read())
 n = con.execute("SELECT COUNT(*) FROM account_months").fetchone()[0]

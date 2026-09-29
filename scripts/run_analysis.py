@@ -20,10 +20,10 @@ import json
 import os
 import sys
 
-try:
-    import duckdb
-except ImportError:
-    sys.exit("duckdb is required: python3 -m pip install duckdb")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from requirements import require  # noqa: E402
+
+duckdb = require("duckdb")
 
 
 def split_statements(text: str):

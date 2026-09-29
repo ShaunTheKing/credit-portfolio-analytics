@@ -36,6 +36,9 @@ import sys
 import urllib.request
 import zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from requirements import require  # noqa: E402
+
 UCI_ZIP = "https://archive.ics.uci.edu/static/public/350/default+of+credit+card+clients.zip"
 UCI_PAGE = "https://archive.ics.uci.edu/dataset/350/default+of+credit+card+clients"
 CITATION = ("Yeh, I. (2009). Default of Credit Card Clients [Dataset]. "
@@ -94,12 +97,7 @@ def download(dest_dir: str) -> str:
 
 
 def read_xls(path: str):
-    try:
-        import xlrd
-    except ImportError:
-        sys.exit("xlrd is required to read this .xls file:\n"
-                 "  python3 -m pip install --target .tools/pylibs xlrd\n"
-                 "  PYTHONPATH=.tools/pylibs python3 scripts/fetch_real_data.py")
+    xlrd = require("xlrd")
     book = xlrd.open_workbook(path)
     sheet = book.sheet_by_index(0)
     header = [str(h).strip() for h in sheet.row_values(1)]  # row 0 is a title row

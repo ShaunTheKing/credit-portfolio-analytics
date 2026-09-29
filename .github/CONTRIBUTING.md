@@ -6,7 +6,11 @@ suggestions are welcome.
 ## Running locally
 
 ```bash
-pip install duckdb xlrd
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# If a dependency is missing, every script prints tailored guidance;
+# python3 scripts/requirements.py reports interpreter and venv status.
 
 # Real-data analysis (downloads ~5 MB from UCI on first run)
 python3 scripts/fetch_real_data.py

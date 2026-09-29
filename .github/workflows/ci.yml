@@ -19,7 +19,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install duckdb
+        run: pip install -r requirements.txt
 
       - name: Run full pipeline (generate -> load -> analyze -> build)
         run: ./scripts/run_all.sh
@@ -67,7 +67,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install duckdb xlrd
+        run: pip install -r requirements.txt
 
       - name: Fetch and reshape the UCI dataset
         run: python3 scripts/fetch_real_data.py
@@ -127,7 +127,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install duckdb
+        run: pip install -r requirements.txt
 
       - name: Fetch and clean the LendingClub loan files
         run: python3 scripts/fetch_loan_data.py
@@ -177,6 +177,63 @@ jobs:
                 f"60mo grade D {t60['D']} (pricing breakdown holds)")
           PY
 
+  onboarding:
+    name: Fresh-clone onboarding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      # Nothing installed yet — this is the state a stranger starts in.
+      - name: Scripts must fail with guidance, not a traceback
+        run: |
+          set +e
+          out=$(python3 scripts/run_loan_analysis.py 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          [ "$code" -ne 0 ] || { echo "FAIL: should exit non-zero without duckdb"; exit 1; }
+          echo "$out" | grep -q "not available to this interpreter" \
+            || { echo "FAIL: missing clear error"; exit 1; }
+          echo "$out" | grep -qi "venv" \
+            || { echo "FAIL: error should recommend a venv"; exit 1; }
+          # Guard the exact confusion that broke a real user: a bare `pip install`
+          # is refused on Homebrew/conda Python, so the guidance must not be that alone.
+          echo "$out" | grep -qi "externally-managed-environment" \
+            || { echo "FAIL: error should warn about PEP 668"; exit 1; }
+
+      - name: Doctor script must run without dependencies
+        run: |
+          python3 scripts/requirements.py
+          python3 scripts/requirements.py | grep -q "MISSING" \
+            || { echo "FAIL: doctor should report missing modules"; exit 1; }
+
+      - name: run_all.sh must fail cleanly without the module
+        run: |
+          set +e
+          ./scripts/run_all.sh --quick >/tmp/ra.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/ra.log
+          [ "$code" -ne 0 ] || { echo "FAIL: run_all.sh should exit non-zero"; exit 1; }
+          grep -q "not available to this interpreter" /tmp/ra.log \
+            || { echo "FAIL: run_all.sh should explain the problem"; exit 1; }
+
+      - name: Documented quickstart must actually work
+        run: |
+          # Follow the README verbatim: venv + requirements.txt, then a pipeline.
+          python3 -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt
+          .venv/bin/python scripts/requirements.py | grep -q "virtualenv  : True" \
+            || { echo "FAIL: doctor should detect the venv"; exit 1; }
+          .venv/bin/python scripts/run_all.sh --quick >/dev/null 2>&1 || true
+          PATH="$PWD/.venv/bin:$PATH" ./scripts/run_all.sh --quick
+          test -s output/analysis_results.json \
+            || { echo "FAIL: documented quickstart produced no output"; exit 1; }
+          echo "OK: fresh clone -> venv -> pipeline works as documented"
+
   sql-lint:
     name: SQL executes
     runs-on: ubuntu-latest
@@ -185,7 +242,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - run: pip install duckdb
+      - run: pip install -r requirements.txt
       - name: Every SQL statement must execute
         run: |
           ./scripts/run_all.sh --quick

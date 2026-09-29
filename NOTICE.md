@@ -96,7 +96,8 @@ the real datasets demonstrate findings.
 ## Reproducing
 
 ```bash
-pip install duckdb xlrd
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
 # UCI credit-card data (downloads ~5MB)
 python3 scripts/fetch_real_data.py
