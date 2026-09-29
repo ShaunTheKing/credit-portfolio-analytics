@@ -1,0 +1,21 @@
+# Generated data — regenerate locally, keeps the repo small and reviewable
+data/
+data_real/
+.cache/
+*.duckdb
+*.duckdb.wal
+*.xls
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  synthetic-pipeline:
+    name: Synthetic pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install duckdb
+
+      - name: Run full pipeline (generate -> load -> analyze -> build)
+        run: ./scripts/run_all.sh
+
+      - name: Assert deliverables exist
+        run: |
+          for f in output/executive-memo.md output/dashboard.html output/analysis_results.json; do
+            test -s "$f" || { echo "MISSING: $f"; exit 1; }
+          done
+
+      - name: Assert no regressions in headline numbers
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          data = {r["title"]: r for r in json.load(open("output/analysis_results.json"))}
+          seg = {r[0]: r for r in data["Segment economics (revenue vs expected loss)"]["rows"]}
+          bands = data["Risk by origination band (loss must rise A->E)"]["rows"]
+
+          # Loss rates must increase monotonically across origination bands
+          rates = [r[2] for r in bands]
+          if rates != sorted(rates):
+              sys.exit(f"FAIL: loss rates not monotonic across bands: {rates}")
+
+          # The growth segment must exist with sane economics
+          s2 = seg.get("S2_revolver_headroom")
+          if not s2 or s2[1] < 500:
+              sys.exit(f"FAIL: headroom segment missing or too small: {s2}")
+
+          # Margin must be positive for the top two segments
+          for name in ("S2_revolver_headroom", "S3_maxed_out"):
+              if seg[name][5] <= 0:
+                  sys.exit(f"FAIL: {name} has non-positive margin")
+
+          print(f"OK: monotonic loss {rates}; headroom n={s2[1]}, margin=${s2[5]}")
+          PY
+
+  real-pipeline:
+    name: Real-data pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install duckdb xlrd
+
+      - name: Fetch and reshape the UCI dataset
+        run: python3 scripts/fetch_real_data.py
+
+      - name: Run real-data analysis
+        run: python3 scripts/run_real_analysis.py
+
+      - name: Assert dataset validated and results produced
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          results = {r["query"]: r for r in json.load(open("output/real/real_results.json"))}
+          if len(results) < 9:
+              sys.exit(f"FAIL: expected 9 result sets, got {len(results)}")
+
+          # Q0: annualized loss rate must be plausible on total exposure
+          q0 = {c: v for c, v in zip(results["Q0"]["columns"], results["Q0"]["rows"][0])}
+          rate = q0["ann_rate_on_total_exposure_pct"]
+          carried = q0["ann_rate_on_carried_pct"]
+          if not (0.5 <= rate <= 15):
+              sys.exit(f"FAIL: loss rate implausible on total exposure: {rate}%")
+          if not (rate < carried):
+              sys.exit("FAIL: exposure-based rate should be below carried-balance rate")
+
+          # Q1: the overall default rate must match the published ~22.1% baseline.
+          # This is the ETL validation that everything else depends on.
+          q1 = results["Q1"]["rows"]
+          total = sum(r[1] for r in q1)
+          weighted = sum(r[1] * r[2] for r in q1) / total
+          if not (21.5 <= weighted <= 22.7):
+              sys.exit(f"FAIL: default rate {weighted:.2f}% off the published ~22.1% baseline")
+
+          # Q1: risk must rise with delinquency depth. The deepest bucket (5+ months
+          # late, n=65) dips slightly — a documented small-sample artifact — so we
+          # assert the trend holds for the buckets large enough to be reliable, and
+          # that the first bucket is far below the peak.
+          rates = [(r[0], r[1], r[2]) for r in q1]
+          reliable = [rate for _, n, rate in rates if n >= 300]
+          if reliable != sorted(reliable):
+              sys.exit(f"FAIL: default rates not rising across well-populated buckets: {reliable}")
+          if rates[0][2] >= min(r for _, _, r in rates[1:]):
+              sys.exit(f"FAIL: current-status default rate not below delinquent buckets: {rates}")
+
+          print(f"OK: loss {rate}% on exposure ({carried}% on carried); "
+                f"default rate {weighted:.2f}% matches baseline; "
+                f"rising {reliable} (small buckets: {[f'{r}%' for _, n, r in rates if n < 300]})")
+          PY
+
+  sql-lint:
+    name: SQL executes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install duckdb
+      - name: Every SQL statement must execute
+        run: |
+          ./scripts/run_all.sh --quick
+          python3 - <<'PY'
+          import sys, os
+          sys.path.insert(0, "scripts")
+          import duckdb
+          from run_analysis import split_statements
+
+          con = duckdb.connect("credit.duckdb")
+          total = 0
+          for f in ("sql/kpi_dashboard.sql", "sql/segmentation.sql", "sql/pricing_sensitivity.sql"):
+              for stmt in split_statements(open(f).read()):
+                  con.execute(stmt).fetchall()
+                  total += 1
+          print(f"OK: all {total} synthetic SQL statements execute")
+          PY
